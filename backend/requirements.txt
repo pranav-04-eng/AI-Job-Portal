@@ -1,6 +1,23 @@
+# Web framework (all services + gateway)
 fastapi
 uvicorn[standard]
-python-multipart
-groq
-langgraph
+python-multipart          # file/form uploads (resume PDF, interview audio)
+pydantic[email]           # EmailStr validation in auth-service
+
+# Auth / security
+python-jose[cryptography] # JWT mint/verify
+bcrypt                    # password hashing (used directly; see common/security.py)
+
+# Persistence (per-service SQLite)
+SQLAlchemy
+
+# AI / orchestration
+groq                      # STT (Whisper) + LLM (Llama) + TTS (Orpheus)
+langgraph                 # interview loop + resume-screening orchestration
 python-dotenv
+
+# Gateway + inter-service calls
+httpx
+
+# Resume parsing
+pypdf                     # extract text from uploaded PDF resumes
