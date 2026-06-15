@@ -4,7 +4,7 @@ All three hit the OpenAI-compatible GroqCloud endpoints via the official SDK.
 """
 import os
 import base64
-from groq import Groq
+from groq import Groq, BadRequestError
 
 client = Groq(api_key=os.environ["GROQ_API_KEY"])
 
@@ -14,6 +14,10 @@ STT_MODEL = "whisper-large-v3"            # or "whisper-large-v3-turbo" for lowe
 LLM_MODEL = "llama-3.3-70b-versatile"
 TTS_MODEL = "canopylabs/orpheus-v1-english"
 TTS_VOICE = "troy"                        # try: austin, autumn, troy
+
+
+class TTSModelTermsRequired(RuntimeError):
+    """Raised when the configured TTS model requires terms acceptance."""
 
 
 def transcribe(audio_bytes: bytes, filename: str = "answer.webm") -> str:
@@ -36,11 +40,20 @@ def chat(messages: list, json_mode: bool = False) -> str:
 
 def synthesize(text: str) -> str:
     """Text -> base64-encoded WAV audio (data the browser can play directly)."""
-    response = client.audio.speech.create(
-        model=TTS_MODEL,
-        voice=TTS_VOICE,
-        input=text,
-        response_format="wav",
-    )
+    try:
+        response = client.audio.speech.create(
+            model=TTS_MODEL,
+            voice=TTS_VOICE,
+            input=text,
+            response_format="wav",
+        )
+    except BadRequestError as exc:
+        msg = str(exc)
+        if "model_terms_required" in msg or "requires terms acceptance" in msg:
+            raise TTSModelTermsRequired(
+                f"TTS model '{TTS_MODEL}' requires terms acceptance in Groq Console."
+            ) from exc
+        raise
+
     audio_bytes = response.read()
     return base64.b64encode(audio_bytes).decode("utf-8")

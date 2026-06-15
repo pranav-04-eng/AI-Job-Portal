@@ -3,6 +3,7 @@ import React, { useState, useRef } from "react";
 const API = "http://localhost:8000";
 
 function playBase64Wav(b64) {
+  if (!b64) return null;
   const audio = new Audio("data:audio/wav;base64," + b64);
   audio.play().catch(() => {});
   return audio;
@@ -33,10 +34,13 @@ export default function App() {
         body: JSON.stringify({ role }),
       });
       const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.detail || "Failed to start interview");
+      }
       setThreadId(data.thread_id);
       setQuestion(data.question_text);
       playBase64Wav(data.question_audio);
-      setStatus("Listen, then record your answer.");
+      setStatus(data.audio_warning || "Listen, then record your answer.");
     } catch (e) {
       setStatus("Error: " + e.message);
     }
@@ -75,6 +79,9 @@ export default function App() {
     try {
       const res = await fetch(`${API}/interview/answer`, { method: "POST", body: form });
       const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.detail || "Failed to submit answer");
+      }
 
       setLog((prev) => [...prev, { q: question, a: data.transcript }]);
 
@@ -82,11 +89,11 @@ export default function App() {
         setQuestion(null);
         setAssessment(data.assessment);
         playBase64Wav(data.closing_audio);
-        setStatus("Interview complete.");
+        setStatus(data.audio_warning || "Interview complete.");
       } else {
         setQuestion(data.question_text);
         playBase64Wav(data.question_audio);
-        setStatus("Listen, then record your next answer.");
+        setStatus(data.audio_warning || "Listen, then record your next answer.");
       }
     } catch (e) {
       setStatus("Error: " + e.message);

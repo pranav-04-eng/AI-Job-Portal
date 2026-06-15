@@ -37,6 +37,14 @@ def _extract_interrupt(result: dict):
     return None
 
 
+def _synthesize_or_none(text: str):
+    """Best-effort TTS. If terms were not accepted, keep interview running without audio."""
+    try:
+        return groq.synthesize(text), None
+    except groq.TTSModelTermsRequired as exc:
+        return None, str(exc)
+
+
 @app.post("/interview/start")
 def start(req: StartRequest):
     thread_id = str(uuid.uuid4())
@@ -50,12 +58,14 @@ def start(req: StartRequest):
         raise HTTPException(500, "Graph did not pause for the first question")
 
     question = payload["question"]
+    question_audio, audio_warning = _synthesize_or_none(question)
     return {
         "thread_id": thread_id,
         "done": False,
         "question_number": payload["number"],
         "question_text": question,
-        "question_audio": groq.synthesize(question),  # base64 wav
+        "question_audio": question_audio,  # base64 wav or None
+        "audio_warning": audio_warning,
     }
 
 
@@ -71,23 +81,27 @@ async def answer(thread_id: str = Form(...), audio: UploadFile = File(...)):
 
     if payload:  # another question is coming
         question = payload["question"]
+        question_audio, audio_warning = _synthesize_or_none(question)
         return {
             "done": False,
             "transcript": transcript,
             "question_number": payload["number"],
             "question_text": question,
-            "question_audio": groq.synthesize(question),
+            "question_audio": question_audio,
+            "audio_warning": audio_warning,
         }
 
     # No interrupt -> the graph reached END. result holds the final state.
     assessment = result.get("assessment", {})
     closing = "Thank you, that concludes the interview. Your responses are being reviewed."
+    closing_audio, audio_warning = _synthesize_or_none(closing)
     return {
         "done": True,
         "transcript": transcript,
         "assessment": assessment,
         "closing_text": closing,
-        "closing_audio": groq.synthesize(closing),
+        "closing_audio": closing_audio,
+        "audio_warning": audio_warning,
     }
 
 
