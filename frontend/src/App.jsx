@@ -2,6 +2,17 @@ import React, { useState, useRef } from "react";
 
 const API = "http://localhost:8000";
 
+function getSupportedAudioMimeType() {
+  if (typeof MediaRecorder === "undefined") return null;
+  const candidates = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/mp4",
+    "audio/ogg;codecs=opus",
+  ];
+  return candidates.find((type) => MediaRecorder.isTypeSupported(type)) || null;
+}
+
 function playBase64Wav(b64) {
   if (!b64) return null;
   const audio = new Audio("data:audio/wav;base64," + b64);
@@ -21,6 +32,7 @@ export default function App() {
 
   const mediaRecorder = useRef(null);
   const chunks = useRef([]);
+  const recordedMimeType = useRef("audio/webm");
 
   async function startInterview() {
     setBusy(true);
@@ -48,15 +60,50 @@ export default function App() {
   }
 
   async function startRecording() {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    chunks.current = [];
-    const mr = new MediaRecorder(stream);
-    mr.ondataavailable = (e) => chunks.current.push(e.data);
-    mr.onstop = () => stream.getTracks().forEach((t) => t.stop());
-    mediaRecorder.current = mr;
-    mr.start();
-    setRecording(true);
-    setStatus("Recording... speak your answer.");
+    if (!question || !threadId) {
+      setStatus("Start the interview first.");
+      return;
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setStatus("Microphone is not supported in this browser.");
+      return;
+    }
+
+    if (typeof MediaRecorder === "undefined") {
+      setStatus("Audio recording is not supported in this browser.");
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = getSupportedAudioMimeType();
+      chunks.current = [];
+      recordedMimeType.current = mimeType || "audio/webm";
+
+      const mr = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
+
+      mr.addEventListener("dataavailable", (e) => {
+        if (e.data && e.data.size > 0) chunks.current.push(e.data);
+      });
+      mr.addEventListener("stop", () => {
+        stream.getTracks().forEach((t) => t.stop());
+      });
+      mr.addEventListener("error", (e) => {
+        setRecording(false);
+        setBusy(false);
+        setStatus(`Recorder error: ${e.error?.message || "unknown error"}`);
+      });
+
+      mediaRecorder.current = mr;
+      mr.start();
+      setRecording(true);
+      setStatus("Recording... speak your answer.");
+    } catch (e) {
+      setStatus("Microphone error: " + (e.message || "permission denied"));
+    }
   }
 
   async function stopAndSubmit() {
@@ -67,14 +114,21 @@ export default function App() {
     setStatus("Transcribing and thinking...");
 
     await new Promise((resolve) => {
-      mr.onstop = () => resolve();
+      mr.addEventListener("stop", resolve, { once: true });
       mr.stop();
     });
 
-    const blob = new Blob(chunks.current, { type: "audio/webm" });
+    if (chunks.current.length === 0) {
+      setStatus("No audio captured. Please try recording again.");
+      setBusy(false);
+      return;
+    }
+
+    const blob = new Blob(chunks.current, { type: recordedMimeType.current });
     const form = new FormData();
     form.append("thread_id", threadId);
-    form.append("audio", blob, "answer.webm");
+    const extension = recordedMimeType.current.includes("mp4") ? "m4a" : "webm";
+    form.append("audio", blob, `answer.${extension}`);
 
     try {
       const res = await fetch(`${API}/interview/answer`, {
